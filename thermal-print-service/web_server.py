@@ -44,6 +44,9 @@ HTML_PAGE = """<!DOCTYPE html>
   .btn-danger { background: transparent; color: var(--red); border: 1px solid var(--red); }
   .btn-secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
   .btn:hover { opacity: 0.85; }
+  .field-label { display: block; font-size: 0.85em; color: var(--muted); margin-bottom: 4px; font-weight: 500; }
+  .field-row { margin-bottom: 12px; }
+  .field-input { width: 100%; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; font-size: 0.95em; }
   .actions { display: flex; gap: 8px; margin-top: 4px; }
   .toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 8px; color: #fff; font-size: 0.9em; display: none; z-index: 100; }
   .toast.success { background: var(--green); }
@@ -66,11 +69,26 @@ HTML_PAGE = """<!DOCTYPE html>
 </div>
 
 <div class="card">
-  <h2>API URLs</h2>
+  <h2>Configuration</h2>
+  <label class="field-label">API URLs</label>
   <ul class="url-list" id="url-list"></ul>
-  <div class="actions">
+  <div class="actions" style="margin-bottom:16px">
     <button class="btn btn-secondary" onclick="addUrl()">+ Add URL</button>
-    <button class="btn btn-primary" onclick="saveUrls()">Save</button>
+  </div>
+  <div class="field-row">
+    <label class="field-label" for="auth_token">Auth Token</label>
+    <input type="password" id="auth_token" class="field-input" placeholder="Bearer token for API auth">
+  </div>
+  <div class="field-row">
+    <label class="field-label" for="poll_interval">Poll Interval (seconds)</label>
+    <input type="number" id="poll_interval" class="field-input" min="1" max="300" value="10">
+  </div>
+  <div class="field-row">
+    <label class="field-label" for="printer_device">Printer Device</label>
+    <input type="text" id="printer_device" class="field-input" placeholder="/dev/usb/lp0">
+  </div>
+  <div class="actions">
+    <button class="btn btn-primary" onclick="saveConfig()">Save &amp; Restart</button>
   </div>
 </div>
 
@@ -115,17 +133,23 @@ HTML_PAGE = """<!DOCTYPE html>
     return Array.from(document.querySelectorAll('#url-list input')).map(i => i.value.trim()).filter(Boolean);
   }
 
-  async function saveUrls() {
+  async function saveConfig() {
     const urls = getUrls();
     if (urls.length === 0) { toast('Add at least one URL', 'error'); return; }
+    const payload = {
+      base_urls: urls,
+      auth_token: document.getElementById('auth_token').value,
+      poll_interval: parseInt(document.getElementById('poll_interval').value) || 10,
+      printer_device: document.getElementById('printer_device').value || '/dev/usb/lp0'
+    };
     try {
       const res = await fetch('api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base_urls: urls })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
-      if (data.ok) toast('Saved — restart addon to apply', 'success');
+      if (data.ok) toast('Saved — restarting addon...', 'success');
       else toast(data.error || 'Save failed', 'error');
     } catch (e) { toast('Request failed', 'error'); }
   }
@@ -153,6 +177,9 @@ HTML_PAGE = """<!DOCTYPE html>
       const res = await fetch('api/config');
       const data = await res.json();
       renderUrls(data.base_urls || []);
+      document.getElementById('auth_token').value = data.auth_token || '';
+      document.getElementById('poll_interval').value = data.poll_interval || 10;
+      document.getElementById('printer_device').value = data.printer_device || '/dev/usb/lp0';
     } catch (e) { console.error(e); }
   }
 
@@ -236,14 +263,23 @@ class IngressHandler(BaseHTTPRequestHandler):
             )
             if resp.status_code == 200:
                 data = resp.json().get("data", resp.json())
-                JsonResponse.send(self, {"base_urls": data.get("base_urls", [])})
+                JsonResponse.send(self, {
+                    "base_urls": data.get("base_urls", []),
+                    "auth_token": data.get("auth_token", ""),
+                    "poll_interval": data.get("poll_interval", 10),
+                    "printer_device": data.get("printer_device", "/dev/usb/lp0"),
+                })
             else:
-                JsonResponse.send(self, {"base_urls": [], "error": f"Supervisor HTTP {resp.status_code}"})
+                JsonResponse.send(self, {"error": f"Supervisor HTTP {resp.status_code}"})
         except Exception as e:
             logger.error(f"Failed to read config from Supervisor: {e}")
-            # Fallback: return current env
             raw = os.getenv("BASE_URLS", "")
-            JsonResponse.send(self, {"base_urls": [u.strip() for u in raw.split(",") if u.strip()]})
+            JsonResponse.send(self, {
+                "base_urls": [u.strip() for u in raw.split(",") if u.strip()],
+                "auth_token": os.getenv("AUTH_TOKEN", ""),
+                "poll_interval": int(os.getenv("POLL_INTERVAL", "10")),
+                "printer_device": os.getenv("PRINTER_DEVICE", "/dev/usb/lp0"),
+            })
 
     def _post_config(self):
         try:
@@ -254,25 +290,31 @@ class IngressHandler(BaseHTTPRequestHandler):
                 JsonResponse.send(self, {"ok": False, "error": "No URLs provided"}, 400)
                 return
 
-            # Read current options, merge, write back
-            resp = requests.get(
-                f"{SUPERVISOR_API}/options/config",
-                headers={"Authorization": f"Bearer {SUPERVISOR_TOKEN}"},
-                timeout=5,
-            )
-            current = resp.json().get("data", resp.json()) if resp.status_code == 200 else {}
-            current["base_urls"] = new_urls
+            new_options = {
+                "base_urls": new_urls,
+                "auth_token": body.get("auth_token", ""),
+                "poll_interval": int(body.get("poll_interval", 10)),
+                "printer_device": body.get("printer_device", "/dev/usb/lp0"),
+            }
 
+            # Save options
             resp = requests.post(
                 f"{SUPERVISOR_API}/options",
-                json={"options": current},
+                json={"options": new_options},
                 headers={"Authorization": f"Bearer {SUPERVISOR_TOKEN}"},
                 timeout=5,
             )
-            if resp.status_code == 200:
-                JsonResponse.send(self, {"ok": True})
-            else:
+            if resp.status_code != 200:
                 JsonResponse.send(self, {"ok": False, "error": f"Supervisor HTTP {resp.status_code}"}, 500)
+                return
+
+            # Restart addon to apply
+            requests.post(
+                f"{SUPERVISOR_API}/restart",
+                headers={"Authorization": f"Bearer {SUPERVISOR_TOKEN}"},
+                timeout=10,
+            )
+            JsonResponse.send(self, {"ok": True})
         except Exception as e:
             logger.error(f"Failed to save config: {e}")
             JsonResponse.send(self, {"ok": False, "error": str(e)}, 500)

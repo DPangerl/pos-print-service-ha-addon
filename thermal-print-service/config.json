@@ -1,7 +1,7 @@
 {
   "name": "Thermal Print Service",
   "description": "Polls a remote API for todos and prints them on an Epson TM-T88V thermal receipt printer via USB",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "slug": "thermal_print_service",
   "url": "https://github.com/DPangerl/pos-print-service-ha-addon",
   "arch": ["aarch64", "armv7", "armhf", "amd64", "i386"],
