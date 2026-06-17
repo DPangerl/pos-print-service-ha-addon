@@ -1,8 +1,8 @@
 name: "Thermal Print Service"
 description: "Polls a remote API for todos and prints them on an Epson TM-T88V thermal receipt printer via USB"
-version: "1.0.0"
+version: "1.1.0"
 slug: "thermal_print_service"
-url: "https://github.com/DPangerl/pos-print-service"
+url: "https://github.com/DPangerl/pos-print-service-ha-addon"
 arch:
   - aarch64
   - armv7
@@ -11,6 +11,10 @@ arch:
 startup: application
 boot: auto
 init: false
+ingress: true
+ingress_port: 8099
+panel_icon: "mdi:printer"
+panel_title: "Thermal Printer"
 options:
   base_urls:
     - "https://todo.dpangerl.de"

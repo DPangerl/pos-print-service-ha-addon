@@ -12,6 +12,7 @@ import threading
 import logging
 from datetime import datetime
 from print_utils import create_print_job, validate_sections, format_shopping_list, init_printer
+from web_server import start_ingress_server
 
 # Configuration from environment (set by run.sh from HA options)
 BASE_URLS_RAW = os.getenv('BASE_URLS', 'https://todo.dpangerl.de')
@@ -249,6 +250,9 @@ class PrintTodosService:
         logger.info(f'Auth: {"enabled" if AUTH_TOKEN else "disabled"}')
 
         self.running = True
+
+        ingress_thread = threading.Thread(target=start_ingress_server, args=(self,), daemon=True)
+        ingress_thread.start()
 
         status_thread = threading.Thread(target=self.status_sender_loop, daemon=True)
         status_thread.start()

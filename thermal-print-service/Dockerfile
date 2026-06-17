@@ -10,6 +10,7 @@ RUN apk add --no-cache \
 COPY run.sh /
 COPY print-todos.py /
 COPY print_utils.py /
+COPY web_server.py /
 
 RUN chmod a+x /run.sh
 
